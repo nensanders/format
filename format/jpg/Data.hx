@@ -35,3 +35,59 @@ typedef Data = {
 	var quality : Float;
 	var pixels : haxe.io.Bytes;
 }
+
+typedef Jfif = {
+    var version : JfifVersion;
+    var densityUnits : Int;
+    var xDensity : Int;
+    var yDensity : Int;
+    var thumbWidth : Int;
+    var thumbHeight : Int;
+    var thumbData : haxe.io.Bytes;
+}
+
+typedef JfifVersion = {
+    var major : Int;
+    var minor : Int;
+}
+
+typedef Adobe = {
+    var version: Int;
+    var flags0: Int;
+    var flags1: Int;
+    var transformCode: Int;
+}
+
+typedef Frame = {
+    @:optional var extended: Bool;
+    @:optional var progressive: Bool;
+    @:optional var precision: Int;
+    @:optional var scanLines: Int;
+    @:optional var samplesPerLine: Int;
+    @:optional var maxH: Int;
+    @:optional var maxV: Int;
+    @:optional var mcusPerLine: Int;
+    @:optional var mcusPerColumn: Int;
+    @:optional var components: Array<Component>;
+    @:optional var componentIds: Map<Int, Int>;
+}
+
+typedef Component = {
+    @:optional var h: Int;
+    @:optional var v: Int;
+    @:optional var pred: Int;
+    @:optional var blocksPerLine: Int;
+    @:optional var blocksPerColumn: Int;
+    @:optional var blockData: haxe.io.Bytes;
+    @:optional var quantizationTable: Array<Int>;
+    @:optional var huffmanTableDC: Array<Dynamic>;
+    @:optional var huffmanTableAC: Array<Dynamic>;
+    @:optional var scaleX: Float;
+    @:optional var scaleY: Float;
+    @:optional var output: haxe.io.Bytes;
+}
+
+typedef HuffNode = {
+    var children: Array<Dynamic>;
+    var index: Int;
+}
