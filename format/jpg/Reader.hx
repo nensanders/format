@@ -70,23 +70,7 @@ using haxe.io.Bytes;
 @:access(haxe.io.Bytes)
 class Reader {
 
-    static var dctZigZag: Array<Int> = [
-     0,
-     1,  8,
-    16,  9,  2,
-     3, 10, 17, 24,
-    32, 25, 18, 11, 4,
-     5, 12, 19, 26, 33, 40,
-    48, 41, 34, 27, 20, 13,  6,
-     7, 14, 21, 28, 35, 42, 49, 56,
-    57, 50, 43, 36, 29, 22, 15,
-    23, 30, 37, 44, 51, 58,
-    59, 52, 45, 38, 31,
-    39, 46, 53, 60,
-    61, 54, 47,
-    55, 62,
-    63
-    ];
+    static var dctZigZag: Vector<Int>;
 
     inline static var dctCos1  =  4017;   // cos(pi/16)
     inline static var dctSin1  =   799;   // sin(pi/16)
@@ -110,6 +94,28 @@ class Reader {
     public function new(i : haxe.io.Bytes) {
       //  i.bigEndian = true; // TODO check
         this.data = i; // For now we convert to pure bytes
+        initZigZag();
+    }
+
+    private function initZigZag(): Void
+    {
+        dctZigZag = Vector.fromArrayCopy([
+         0,
+         1,  8,
+        16,  9,  2,
+         3, 10, 17, 24,
+        32, 25, 18, 11, 4,
+         5, 12, 19, 26, 33, 40,
+        48, 41, 34, 27, 20, 13,  6,
+         7, 14, 21, 28, 35, 42, 49, 56,
+        57, 50, 43, 36, 29, 22, 15,
+        23, 30, 37, 44, 51, 58,
+        59, 52, 45, 38, 31,
+        39, 46, 53, 60,
+        61, 54, 47,
+        55, 62,
+        63
+        ]);
     }
 
     public function getData(width: Int, height: Int, forceRGBoutput: Bool): haxe.io.Bytes
@@ -141,7 +147,10 @@ class Reader {
         var scaleX: Float = this.width / width;
         var scaleY: Float = this.height / height;
 
-        var component: Component, componentScaleX, componentScaleY, blocksPerScanline;
+        var component: Component;
+        var componentScaleX: Float;
+        var componentScaleY: Float;
+        var blocksPerScanline;
         var x, y, i, j, k;
         var index;
         var offset = 0;
@@ -149,8 +158,7 @@ class Reader {
         var numComponents = this.components.length;
         var dataLength = width * height * numComponents;
         var data: haxe.io.Bytes = haxe.io.Bytes.alloc(dataLength);  // Uint8Array(dataLength);
-        var xScaleBlockOffset: Array<Int> = new Array();
-        xScaleBlockOffset[width - 1] = 0;
+        var xScaleBlockOffset: Vector<Int> = new Vector(width);
         var mask3LSB = 0xfffffff8; // used to clear the 3 LSBs
 
         for (i in 0...numComponents)
@@ -165,14 +173,14 @@ class Reader {
             // precalculate the xScaleBlockOffset
             for (x in 0...width)
             {
-                j = 0 | Math.floor(x * componentScaleX);
+                j = 0 | Std.int(x * componentScaleX);
                 xScaleBlockOffset[x] = ((j & mask3LSB) << 3) | (j & 7);
             }
 
             // linearize the blocks of the component
             for (y in 0...height)
             {
-                j = 0 | Math.floor(y * componentScaleY);
+                j = 0 | Std.int(y * componentScaleY);
                 index = blocksPerScanline * (j & mask3LSB) | ((j & 7) << 3);
 
                 for (x in 0...width)
@@ -186,11 +194,13 @@ class Reader {
         // TODO check usage
         // decodeTransform contains pairs of multiplier (-256..256) and additive
        /* var transform = this.decodeTransform;
-        if (transform) {
-        for (i = 0; i < dataLength;) {
-        for (j = 0, k = 0; j < numComponents; j++, i++, k += 2) {
-        data[i] = ((data[i] * transform[k]) >> 8) + transform[k + 1];
-            }
+        if (transform)
+        {
+            for (i = 0; i < dataLength;)
+            {
+                for (j = 0, k = 0; j < numComponents; j++, i++, k += 2) {
+                    data[i] = ((data[i] * transform[k]) >> 8) + transform[k + 1];
+                }
             }
         }*/
         return data;
@@ -215,9 +225,9 @@ class Reader {
 
     function convertYccToRgb(data: haxe.io.Bytes): haxe.io.Bytes
     {
-        var Y: Int;
-        var Cb: Int;
-        var Cr: Int;
+        var Y: Float;
+        var Cb: Float;
+        var Cr: Float;
         var i = 0;
         var length = data.length;
         while (i < length)
@@ -383,7 +393,15 @@ class Reader {
         var pixels = null;
         var frame: Frame = null;
         var resetInterval: Int = 0;
-        var quantizationTables: Array<Array<Int>> = new Array();
+        var quantizationTables: haxe.ds.Vector<haxe.ds.Vector<Int>>;
+
+        quantizationTables = haxe.ds.Vector.fromArrayCopy([
+        new haxe.ds.Vector(64),
+        new haxe.ds.Vector(64),
+        new haxe.ds.Vector(64),
+        new haxe.ds.Vector(64)
+        ]);
+
         var huffmanTablesAC:Array<Dynamic> = new Array();
         var huffmanTablesDC:Array<Dynamic> = new Array();
 
@@ -395,7 +413,7 @@ class Reader {
 
         function readDataBlock(): haxe.io.Bytes {
             var length = readUint16();
-            var array = data.sub(offset, length - 2);
+            var array = data.sub(offset, (length - 2));
             offset += array.length;
             return array;
         }
@@ -489,8 +507,7 @@ class Reader {
                     var z;
                     while (offset < quantizationTablesEnd) {
                         var quantizationTableSpec = data.b.fastGet(offset++);
-                        var tableData: Array<Int> = new Array();
-                        tableData[64] = 0;
+                        var tableData: Vector<Int> = new Vector(64);
                         if ((quantizationTableSpec >> 4) == 0) { // 8 bit values
                             for (j in 0...64) {
                             z = dctZigZag[j];
@@ -913,17 +930,17 @@ class Reader {
         }
 
         function decodeMcu(component: Component, decode, mcu: Int, row: Int, col: Int) {
-            var mcuRow = Std.int(mcu / mcusPerLine) | 0;
-            var mcuCol = mcu % mcusPerLine;
-            var blockRow = mcuRow * component.v + row;
-            var blockCol = mcuCol * component.h + col;
+            var mcuRow: Int = Std.int(mcu / mcusPerLine) | 0;
+            var mcuCol: Int = mcu % mcusPerLine;
+            var blockRow: Int = mcuRow * component.v + row;
+            var blockCol: Int = mcuCol * component.h + col;
             var offset = getBlockBufferOffset(component, blockRow, blockCol);
             decode(component, offset);
         }
 
         function decodeBlock(component: Component, decode, mcu) {
-            var blockRow = Std.int(mcu / component.blocksPerLine) | 0;
-            var blockCol = mcu % component.blocksPerLine;
+            var blockRow: Int = Std.int(mcu / component.blocksPerLine) | 0;
+            var blockCol: Int = mcu % component.blocksPerLine;
             var offset = getBlockBufferOffset(component, blockRow, blockCol);
             decode(component, offset);
         }
@@ -1009,8 +1026,12 @@ class Reader {
     {
         var blocksPerLine = component.blocksPerLine;
         var blocksPerColumn = component.blocksPerColumn;
-        var computationBuffer: Array<Int> = new Array(); // Int16Array
-        computationBuffer[64] = 0;
+        var computationBuffer: Vector<Int> = new Vector(64); // Int16Array
+
+        for (i in 0...64)
+        {
+            computationBuffer[i] = 0;
+        }
 
         for (blockRow in 0...blocksPerColumn)
         {
@@ -1028,7 +1049,7 @@ class Reader {
     //   'Practical Fast 1-D DCT Algorithms with 11 Multiplications',
     //   IEEE Intl. Conf. on Acoustics, Speech & Signal Processing, 1989,
     //   988-991.
-    function quantizeAndInverse(component: Component, blockBufferOffset: Int, p: Array<Int>)
+    function quantizeAndInverse(component: Component, blockBufferOffset: Int, p: Vector<Int>)
     {
         var qt = component.quantizationTable;
         var blockData = component.blockData;
