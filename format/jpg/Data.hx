@@ -79,7 +79,7 @@ typedef Component = {
     @:optional var blocksPerLine: Int;
     @:optional var blocksPerColumn: Int;
     @:optional var blockData: haxe.ds.Vector<Int>;
-    @:optional var quantizationTable: haxe.ds.Vector<Int>;
+    @:optional var quantizationTable: haxe.ds.Vector<UInt>;
     @:optional var huffmanTableDC: Array<Dynamic>;
     @:optional var huffmanTableAC: Array<Dynamic>;
     @:optional var scaleX: Float;

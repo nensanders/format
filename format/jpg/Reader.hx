@@ -92,9 +92,16 @@ class Reader {
     public var numComponents: Int;
 
     public function new(i: haxe.io.Bytes) {
-      //  i.bigEndian = true; // TODO check
         this.data = i; // For now we convert to pure bytes
         initZigZag();
+    }
+
+    private function fillVectorInt(source: haxe.ds.Vector<Int>)
+    {
+        for (i in 0...source.length)
+        {
+            source.set(i, 0);
+        }
     }
 
     private function initZigZag(): Void
@@ -210,7 +217,7 @@ class Reader {
         }
     }
 
-    inline static function njClip(x: Int): Int
+    inline static function clampInt0to255(x: Int): Int
     {
         return x < 0 ? 0 : x > 0xFF ? 0xFF : x;
     }
@@ -227,12 +234,9 @@ class Reader {
             y = data.b.fastGet(i) << 8;
             cb = data.b.fastGet(i + 1) - 128;
             cr = data.b.fastGet(i + 2) - 128;
-            var r = njClip((y + 359 * cr + 128) >> 8);
-            var g = njClip((y -  88 * cb - 183 * cr + 128) >> 8);
-            var b = njClip((y + 454 * cb + 128) >> 8);
-            data.set(i    , r);
-            data.set(i + 1, g);
-            data.set(i + 2, b);
+            data.set(i    , clampInt0to255((y + 359 * cr + 128) >> 8));
+            data.set(i + 1, clampInt0to255((y -  88 * cb - 183 * cr + 128) >> 8));
+            data.set(i + 2, clampInt0to255((y + 454 * cb + 128) >> 8));
             i += 3;
         }
         return data;
@@ -381,14 +385,14 @@ class Reader {
 
     public function parse()
     {
-        var offset = 0;
+        var offset: UInt = 0;
         var length = this.data.length;
         var jfif: Jfif = null;
         var adobe: Adobe = null;
         var pixels = null;
         var frame: Frame = null;
         var resetInterval: Int = 0;
-        var quantizationTables: haxe.ds.Vector<haxe.ds.Vector<Int>>;
+        var quantizationTables: haxe.ds.Vector<haxe.ds.Vector<UInt>>;
 
         quantizationTables = haxe.ds.Vector.fromArrayCopy([
         new haxe.ds.Vector(64),
@@ -400,7 +404,7 @@ class Reader {
         var huffmanTablesAC:Array<Dynamic> = new Array();
         var huffmanTablesDC:Array<Dynamic> = new Array();
 
-        function readUint16() {
+        function readUint16(): UInt {
             var value = (data.b.fastGet(offset) << 8) | data.b.fastGet(offset + 1);
             offset += 2;
             return value;
@@ -439,6 +443,7 @@ class Reader {
             var blocksBufferSize = 64 * blocksPerColumnForMcu *
             (blocksPerLineForMcu + 1);
             component.blockData = new Vector(blocksBufferSize);
+                fillVectorInt(component.blockData);
             component.blocksPerLine = blocksPerLine;
             component.blocksPerColumn = blocksPerColumn;
             }
@@ -513,7 +518,7 @@ class Reader {
                     var z;
                     while (offset < quantizationTablesEnd) {
                         var quantizationTableSpec = data.b.fastGet(offset++);
-                        var tableData: Vector<Int> = new Vector(64);
+                        var tableData: Vector<UInt> = new Vector(64);
                         if ((quantizationTableSpec >> 4) == 0) { // 8 bit values
                             for (j in 0...64) {
                             z = dctZigZag[j];
@@ -578,14 +583,14 @@ class Reader {
                     while (i < huffmanLength)
                     {
                         var huffmanTableSpec = data.b.fastGet(offset++);
-                        var codeLengths: Vector<Int> = new Vector(16);
+                        var codeLengths: Vector<UInt> = new Vector(16);
                         var codeLengthSum = 0;
                         for (j in 0...16) {
                             codeLengths[j] = data.b.fastGet(offset);
                             codeLengthSum += codeLengths[j];
                             offset++;
                         }
-                        var huffmanValues: Vector<Int> = new Vector(codeLengthSum);
+                        var huffmanValues: Vector<UInt> = new Vector(codeLengthSum);
                         for (j in 0...codeLengthSum) {
                             huffmanValues[j] = data.b.fastGet(offset);
                             offset++;
@@ -670,7 +675,7 @@ class Reader {
         this.numComponents = this.components.length;
     }
 
-    function buildHuffmanTable(codeLengths: Vector<Int>, values: Vector<Int>) {
+    function buildHuffmanTable(codeLengths: Vector<UInt>, values: Vector<UInt>) {
         var k = 0, i, j, length = 16;
         var code: Array<HuffNode> = new Array<HuffNode>();
         while (length > 0 && codeLengths[length - 1] == 0) {
