@@ -91,7 +91,7 @@ class Reader {
     var components: Array<Component>;
     public var numComponents: Int;
 
-    public function new(i : haxe.io.Bytes) {
+    public function new(i: haxe.io.Bytes) {
       //  i.bigEndian = true; // TODO check
         this.data = i; // For now we convert to pure bytes
         initZigZag();
@@ -152,9 +152,9 @@ class Reader {
         var componentScaleY: Float;
         var blocksPerScanline;
         var x, y, i, j, k;
-        var index;
-        var offset = 0;
-        var output: haxe.io.Bytes;
+        var index: Int = 0;
+        var offset: Int = 0;
+        var output: haxe.ds.Vector<Int>;
         var numComponents = this.components.length;
         var dataLength = width * height * numComponents;
         var data: haxe.io.Bytes = haxe.io.Bytes.alloc(dataLength);  // Uint8Array(dataLength);
@@ -185,30 +185,17 @@ class Reader {
 
                 for (x in 0...width)
                 {
-                    data.set(offset, output.b.fastGet(index + xScaleBlockOffset[x]));
+                    data.set(offset, output.get(index + xScaleBlockOffset[x]));
                     offset += numComponents;
                 }
             }
         }
-
-        // TODO check usage
-        // decodeTransform contains pairs of multiplier (-256..256) and additive
-       /* var transform = this.decodeTransform;
-        if (transform)
-        {
-            for (i = 0; i < dataLength;)
-            {
-                for (j = 0, k = 0; j < numComponents; j++, i++, k += 2) {
-                    data[i] = ((data[i] * transform[k]) >> 8) + transform[k + 1];
-                }
-            }
-        }*/
         return data;
     }
 
     function clamp0to255(a: Float): Int
     {
-        return a <= 0 ? 0 : a >= 255 ? 255 : Std.int(a);
+        return a <= 0.0 ? 0 : a >= 255.0 ? 255 : Std.int(a);
     }
 
     function isColorConversionNeeded()
@@ -223,21 +210,29 @@ class Reader {
         }
     }
 
+    inline static function njClip(x: Int): Int
+    {
+        return x < 0 ? 0 : x > 0xFF ? 0xFF : x;
+    }
+
     function convertYccToRgb(data: haxe.io.Bytes): haxe.io.Bytes
     {
-        var Y: Float;
-        var Cb: Float;
-        var Cr: Float;
+        var y: Int;
+        var cb: Int;
+        var cr: Int;
         var i = 0;
         var length = data.length;
         while (i < length)
         {
-            Y = data.b.fastGet(i);
-            Cb = data.b.fastGet(i + 1);
-            Cr = data.b.fastGet(i + 2);
-            data.set(i    , clamp0to255(Y - 179.456 + 1.402 * Cr));
-            data.set(i + 1, clamp0to255(Y + 135.459 - 0.344 * Cb - 0.714 * Cr));
-            data.set(i + 2, clamp0to255(Y - 226.816 + 1.772 * Cb));
+            y = data.b.fastGet(i) << 8;
+            cb = data.b.fastGet(i + 1) - 128;
+            cr = data.b.fastGet(i + 2) - 128;
+            var r = njClip((y + 359 * cr + 128) >> 8);
+            var g = njClip((y -  88 * cb - 183 * cr + 128) >> 8);
+            var b = njClip((y + 454 * cb + 128) >> 8);
+            data.set(i    , r);
+            data.set(i + 1, g);
+            data.set(i + 2, b);
             i += 3;
         }
         return data;
@@ -412,10 +407,21 @@ class Reader {
         }
 
         function readDataBlock(): haxe.io.Bytes {
-            var length = readUint16();
-            var array = data.sub(offset, (length - 2));
-            offset += array.length;
-            return array;
+            var length: Int = readUint16();
+
+            var subLength: Int = length - 2;
+
+            var subArray: haxe.io.Bytes = haxe.io.Bytes.alloc(subLength);
+            var subArrayIndex: Int = 0;
+
+            for (i in offset...offset + subLength)
+            {
+                subArray.set(subArrayIndex, data.get(i));
+                ++subArrayIndex;
+            }
+
+            offset += subLength;
+            return subArray;
         }
 
         function prepareComponents(frame: Frame) {
@@ -432,7 +438,7 @@ class Reader {
 
             var blocksBufferSize = 64 * blocksPerColumnForMcu *
             (blocksPerLineForMcu + 1);
-            component.blockData = Bytes.alloc(blocksBufferSize);
+            component.blockData = new Vector(blocksBufferSize);
             component.blocksPerLine = blocksPerLine;
             component.blocksPerColumn = blocksPerColumn;
             }
@@ -647,8 +653,6 @@ class Reader {
         this.adobe = adobe;
         this.components = new Array();
 
-        trace(this.width, this.height);
-
         for (i in 0...frame.components.length)
         {
             var component: Component = frame.components[i];
@@ -824,7 +828,7 @@ class Reader {
 
         function decodeDCSuccessive(component: Component, offset: Int)
         {
-            var blockValue: Int = component.blockData.b.fastGet(offset);
+            var blockValue: Int = component.blockData.get(offset);
             blockValue |= (readBit() << successive);
             component.blockData.set(offset, blockValue);
         }
@@ -889,7 +893,7 @@ class Reader {
                         }
                         continue;
                     case 1, 2: // skipping r zero items
-                        var blockValue: Int = component.blockData.b.fastGet(offset + z);
+                        var blockValue: Int = component.blockData.get(offset + z);
 
                         if (blockValue != 0)
                         {
@@ -902,7 +906,7 @@ class Reader {
                             }
                         }
                     case 3: // set value for a zero item
-                        var blockValue: Int = component.blockData.b.fastGet(offset + z);
+                        var blockValue: Int = component.blockData.get(offset + z);
 
                         if (blockValue != 0) {
                             blockValue += (readBit() << successive);
@@ -912,7 +916,7 @@ class Reader {
                             successiveACState = 0;
                         }
                     case 4: // eob
-                        var blockValue: Int = component.blockData.b.fastGet(offset + z);
+                        var blockValue: Int = component.blockData.get(offset + z);
 
                         if (blockValue != 0) {
                             blockValue += (readBit() << successive);
@@ -1022,16 +1026,11 @@ class Reader {
         return offset - startOffset;
     }
 
-    function buildComponentData(frame: Frame, component: Component): haxe.io.Bytes
+    function buildComponentData(frame: Frame, component: Component): haxe.ds.Vector<Int>
     {
         var blocksPerLine = component.blocksPerLine;
         var blocksPerColumn = component.blocksPerColumn;
         var computationBuffer: Vector<Int> = new Vector(64); // Int16Array
-
-        for (i in 0...64)
-        {
-            computationBuffer[i] = 0;
-        }
 
         for (blockRow in 0...blocksPerColumn)
         {
@@ -1062,14 +1061,14 @@ class Reader {
         while (row < 64)
         {
             // gather block data
-            p0 = blockData.b.fastGet(blockBufferOffset + row);
-            p1 = blockData.b.fastGet(blockBufferOffset + row + 1);
-            p2 = blockData.b.fastGet(blockBufferOffset + row + 2);
-            p3 = blockData.b.fastGet(blockBufferOffset + row + 3);
-            p4 = blockData.b.fastGet(blockBufferOffset + row + 4);
-            p5 = blockData.b.fastGet(blockBufferOffset + row + 5);
-            p6 = blockData.b.fastGet(blockBufferOffset + row + 6);
-            p7 = blockData.b.fastGet(blockBufferOffset + row + 7);
+            p0 = blockData.get(blockBufferOffset + row);
+            p1 = blockData.get(blockBufferOffset + row + 1);
+            p2 = blockData.get(blockBufferOffset + row + 2);
+            p3 = blockData.get(blockBufferOffset + row + 3);
+            p4 = blockData.get(blockBufferOffset + row + 4);
+            p5 = blockData.get(blockBufferOffset + row + 5);
+            p6 = blockData.get(blockBufferOffset + row + 6);
+            p7 = blockData.get(blockBufferOffset + row + 7);
 
             // dequant p0
             p0 *= qt[row];
@@ -1144,7 +1143,8 @@ class Reader {
         }
 
         // inverse DCT on columns
-        for (col in 0...8)
+        var col: Int = 0;
+        while (col < 8)
         {
             p0 = p[col];
             p1 = p[col +  8];
@@ -1169,6 +1169,7 @@ class Reader {
                 blockData.set(blockBufferOffset + col + 40, t);
                 blockData.set(blockBufferOffset + col + 48, t);
                 blockData.set(blockBufferOffset + col + 56, t);
+                ++col;
                 continue;
             }
 
@@ -1236,6 +1237,7 @@ class Reader {
             blockData.set(blockBufferOffset + col + 40, p5);
             blockData.set(blockBufferOffset + col + 48, p6);
             blockData.set(blockBufferOffset + col + 56, p7);
+            ++col;
         }
     }
 }

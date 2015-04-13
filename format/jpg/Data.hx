@@ -78,13 +78,13 @@ typedef Component = {
     @:optional var pred: Int;
     @:optional var blocksPerLine: Int;
     @:optional var blocksPerColumn: Int;
-    @:optional var blockData: haxe.io.Bytes;
+    @:optional var blockData: haxe.ds.Vector<Int>;
     @:optional var quantizationTable: haxe.ds.Vector<Int>;
     @:optional var huffmanTableDC: Array<Dynamic>;
     @:optional var huffmanTableAC: Array<Dynamic>;
     @:optional var scaleX: Float;
     @:optional var scaleY: Float;
-    @:optional var output: haxe.io.Bytes;
+    @:optional var output: haxe.ds.Vector<Int>;
 }
 
 typedef HuffNode = {
