@@ -56,7 +56,6 @@
 
 package format.jpg;
 
-import Type.ValueType;
 import haxe.ds.Vector;
 import format.jpg.Data.Jfif;
 import format.jpg.Data.Adobe;
@@ -68,8 +67,8 @@ import haxe.io.Bytes;
 using haxe.io.Bytes;
 
 @:access(haxe.io.Bytes)
-class Reader {
-
+class Reader
+{
     static var dctZigZag: Vector<Int>;
 
     inline static var dctCos1  =  4017;   // cos(pi/16)
@@ -125,25 +124,25 @@ class Reader {
         ]);
     }
 
-    public function getData(width: Int, height: Int, forceRGBoutput: Bool): haxe.io.Bytes
+    public function getData(width: Int, height: Int, forceRGBAoutput: Bool, ?invertRGB: Bool = false): haxe.io.Bytes
     {
         if (this.numComponents > 4) {
             throw 'Unsupported color mode';
         }
-        // type of data: Uint8Array(width * height * numComponents)
+
         var data: haxe.io.Bytes = getLinearizedBlockData(width, height);
 
         if (this.numComponents == 3) {
-            return convertYccToRgb(data);
+            return convertYccToRgba(data, invertRGB);
         } else if (this.numComponents == 4) {
             if (isColorConversionNeeded()) {
-                if (forceRGBoutput) {
-                    return convertYcckToRgb(data);
+                if (forceRGBAoutput) {
+                    return convertYcckToRgba(data, invertRGB);
                 } else {
                     return convertYcckToCmyk(data);
                 }
-            } else if (forceRGBoutput) {
-                return convertCmykToRgb(data);
+            } else if (forceRGBAoutput) {
+                return convertCmykToRgba(data, invertRGB);
             }
         }
         return data;
@@ -163,7 +162,8 @@ class Reader {
         var offset: Int = 0;
         var output: haxe.ds.Vector<Int>;
         var numComponents = this.components.length;
-        var dataLength = width * height * numComponents;
+        var stride: Int = numComponents == 4 ? numComponents : numComponents + 1;
+        var dataLength = width * height * stride;
         var data: haxe.io.Bytes = haxe.io.Bytes.alloc(dataLength);  // Uint8Array(dataLength);
         var xScaleBlockOffset: Vector<Int> = new Vector(width);
         var mask3LSB = 0xfffffff8; // used to clear the 3 LSBs
@@ -180,20 +180,20 @@ class Reader {
             // precalculate the xScaleBlockOffset
             for (x in 0...width)
             {
-                j = 0 | Std.int(x * componentScaleX);
+                j = Math.floor(x * componentScaleX);
                 xScaleBlockOffset[x] = ((j & mask3LSB) << 3) | (j & 7);
             }
 
             // linearize the blocks of the component
             for (y in 0...height)
             {
-                j = 0 | Std.int(y * componentScaleY);
+                j = Math.floor(y * componentScaleY);
                 index = blocksPerScanline * (j & mask3LSB) | ((j & 7) << 3);
 
                 for (x in 0...width)
                 {
                     data.set(offset, output.get(index + xScaleBlockOffset[x]));
-                    offset += numComponents;
+                    offset += stride;
                 }
             }
         }
@@ -222,11 +222,14 @@ class Reader {
         return x < 0 ? 0 : x > 0xFF ? 0xFF : x;
     }
 
-    function convertYccToRgb(data: haxe.io.Bytes): haxe.io.Bytes
+    function convertYccToRgba(data: haxe.io.Bytes, invertRgb: Bool): haxe.io.Bytes
     {
         var y: Int;
         var cb: Int;
         var cr: Int;
+        var r: Int;
+        var g: Int;
+        var b: Int;
         var i = 0;
         var length = data.length;
         while (i < length)
@@ -234,20 +237,28 @@ class Reader {
             y = data.b.fastGet(i) << 8;
             cb = data.b.fastGet(i + 1) - 128;
             cr = data.b.fastGet(i + 2) - 128;
-            data.set(i    , clampInt0to255((y + 359 * cr + 128) >> 8));
-            data.set(i + 1, clampInt0to255((y -  88 * cb - 183 * cr + 128) >> 8));
-            data.set(i + 2, clampInt0to255((y + 454 * cb + 128) >> 8));
-            i += 3;
+            r = clampInt0to255((y + 359 * cr + 128) >> 8);
+            g = clampInt0to255((y -  88 * cb - 183 * cr + 128) >> 8);
+            b = clampInt0to255((y + 454 * cb + 128) >> 8);
+            data.set(i    , invertRgb ? b : r);
+            data.set(i + 1, g);
+            data.set(i + 2, invertRgb ? r : b);
+            data.set(i + 3, 0xFF);
+            i += 4;
         }
         return data;
     }
 
-    function convertYcckToRgb(data: haxe.io.Bytes): haxe.io.Bytes
+    function convertYcckToRgba(data: haxe.io.Bytes, invertRgb: Bool): haxe.io.Bytes
     {
         var Y: Float;
         var Cb: Float;
         var Cr: Float;
         var k: Float;
+        var r: Float;
+        var g: Float;
+        var b: Float;
+
         var offset = 0;
 
         var i = 0;
@@ -259,7 +270,7 @@ class Reader {
             Cr = data.b.fastGet(i + 2);
             k = data.b.fastGet(i + 3);
 
-            var r = -122.67195406894 +
+            r = -122.67195406894 +
             Cb * (-6.60635669420364e-5 * Cb + 0.000437130475926232 * Cr -
             5.4080610064599e-5 * Y + 0.00048449797120281 * k -
             0.154362151871126) +
@@ -269,7 +280,7 @@ class Reader {
             0.48357088451265) +
             k * (-0.000336197177618394 * k + 0.484791561490776);
 
-            var g = 107.268039397724 +
+            g = 107.268039397724 +
             Cb * (2.19927104525741e-5 * Cb - 0.000640992018297945 * Cr +
             0.000659397001245577 * Y + 0.000426105652938837 * k -
             0.176491792462875) +
@@ -279,7 +290,7 @@ class Reader {
             0.25802910206845) +
             k * (-0.000318913117588328 * k - 0.213742400323665);
 
-            var b = -20.810012546947 +
+            b = -20.810012546947 +
             Cb * (-0.000570115196973677 * Cb - 2.63409051004589e-5 * Cr +
             0.0020741088115012 * Y - 0.00288260236853442 * k +
             0.814272968359295) +
@@ -289,9 +300,10 @@ class Reader {
             0.116935020465145) +
             k * (-0.000343531996510555 * k + 0.24165260232407);
 
-            data.set(offset++, clamp0to255(r));
+            data.set(offset++, invertRgb ? clamp0to255(b) : clamp0to255(r));
             data.set(offset++, clamp0to255(g));
-            data.set(offset++, clamp0to255(b));
+            data.set(offset++, invertRgb ? clamp0to255(r) : clamp0to255(b));
+            data.set(offset++, 0xFF);
 
             i += 4;
         }
@@ -323,15 +335,23 @@ class Reader {
         return data;
     }
 
-    function convertCmykToRgb(data: haxe.io.Bytes): haxe.io.Bytes
+    function convertCmykToRgba(data: haxe.io.Bytes, invertRgb: Bool): haxe.io.Bytes
     {
         var c: Float;
         var m: Float;
         var y: Float;
         var k: Float;
 
+        var r: Float;
+        var g: Float;
+        var b: Float;
+
+        var resultR: Int;
+        var resultG: Int;
+        var resultB: Int;
+
         var offset = 0;
-        var min = -255 * 255 * 255;
+        var min: Float = -255 * 255 * 255;
         var scale: Float = 1.0 / 255.0 / 255.0;
 
         var i = 0;
@@ -344,7 +364,7 @@ class Reader {
             y = data.b.fastGet(i + 2);
             k = data.b.fastGet(i + 3);
 
-            var r =
+            r =
             c * (-4.387332384609988 * c + 54.48615194189176 * m +
             18.82290502165302 * y + 212.25662451639585 * k -
             72734.4411664936) +
@@ -353,7 +373,7 @@ class Reader {
             y * (-2.5217340131683033 * y - 21.248923337353073 * k +
             4465.541406466231) -
             k * (21.86122147463605 * k + 48317.86113160301);
-            var g =
+            g =
             c * (8.841041422036149 * c + 60.118027045597366 * m +
             6.871425592049007 * y + 31.159100130055922 * k -
             20220.756542821975) +
@@ -362,7 +382,7 @@ class Reader {
             y * (4.444339102852739 * y + 9.8632861493405 * k -
             6341.191035517494) -
             k * (20.737325471181034 * k + 47890.15695978492);
-            var b =
+            b =
             c * (0.8842522430003296 * c + 8.078677503112928 * m +
             30.89978309703729 * y - 0.23883238689178934 * k -
             3616.812083916688) +
@@ -372,9 +392,14 @@ class Reader {
             49363.43385999684) -
             k * (22.33816807309886 * k + 45932.16563550634);
 
-            data.set(offset++, r >= 0 ? 255 : r <= min ? 0 : Std.int(255 + r * scale) | 0);
-            data.set(offset++, g >= 0 ? 255 : g <= min ? 0 : Std.int(255 + g * scale) | 0);
-            data.set(offset++, b >= 0 ? 255 : b <= min ? 0 : Std.int(255 + b * scale) | 0);
+            resultR = r >= 0.0 ? 255 : r <= min ? 0 : Math.floor(255.0 + r * scale);
+            resultG = g >= 0.0 ? 255 : g <= min ? 0 : Math.floor(255.0 + g * scale);
+            resultB = b >= 0.0 ? 255 : b <= min ? 0 : Math.floor(255.0 + b * scale);
+
+            data.set(offset++, invertRgb ? resultB : resultR);
+            data.set(offset++, resultG);
+            data.set(offset++, invertRgb ? resultR : resultB);
+            data.set(offset++, 0xFF);
 
             i += 4;
         }
@@ -758,7 +783,7 @@ class Reader {
             {
                 var index: Int = readBit();
 
-                if (Type.typeof(node[index]) == ValueType.TInt)
+                if (Std.is(node[index], UInt))
                 {
                     return node[index];
                 }
@@ -939,7 +964,7 @@ class Reader {
         }
 
         function decodeMcu(component: Component, decode, mcu: Int, row: Int, col: Int) {
-            var mcuRow: Int = Std.int(mcu / mcusPerLine) | 0;
+            var mcuRow: Int = Math.floor(mcu / mcusPerLine);
             var mcuCol: Int = mcu % mcusPerLine;
             var blockRow: Int = mcuRow * component.v + row;
             var blockCol: Int = mcuCol * component.h + col;
@@ -948,7 +973,7 @@ class Reader {
         }
 
         function decodeBlock(component: Component, decode, mcu) {
-            var blockRow: Int = Std.int(mcu / component.blocksPerLine) | 0;
+            var blockRow: Int = Math.floor(mcu / component.blocksPerLine);
             var blockCol: Int = mcu % component.blocksPerLine;
             var offset = getBlockBufferOffset(component, blockRow, blockCol);
             decode(component, offset);
