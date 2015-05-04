@@ -56,12 +56,14 @@
 
 package format.jpg;
 
+import haxe.io.BytesData;
 import haxe.ds.Vector;
 import format.jpg.Data.Jfif;
 import format.jpg.Data.Adobe;
 import format.jpg.Data.Frame;
 import format.jpg.Data.Component;
 import format.jpg.Data.HuffNode;
+import format.jpg.Data.HuffValue;
 import haxe.io.Bytes;
 
 using haxe.io.Bytes;
@@ -91,7 +93,7 @@ class Reader
     public var numComponents: Int;
 
     public function new(i: haxe.io.Bytes) {
-        this.data = i; // For now we convert to pure bytes
+        this.data = i;
         initZigZag();
     }
 
@@ -164,7 +166,11 @@ class Reader
         var numComponents = this.components.length;
         var stride: Int = numComponents == 4 ? numComponents : numComponents + 1;
         var dataLength = width * height * stride;
-        var data: haxe.io.Bytes = haxe.io.Bytes.alloc(dataLength);  // Uint8Array(dataLength);
+        #if html5
+        var data: haxe.io.Bytes = new haxe.io.Bytes(dataLength, new BytesData()); // This is 2x faster on Chrome, but a little slower on FireFox and Safari
+        #else
+        var data: haxe.io.Bytes = haxe.io.Bytes.alloc(dataLength);
+        #end
         var xScaleBlockOffset: Vector<Int> = new Vector(width);
         var mask3LSB = 0xfffffff8; // used to clear the 3 LSBs
 
@@ -232,19 +238,40 @@ class Reader
         var b: Int;
         var i = 0;
         var length = data.length;
-        while (i < length)
+
+        if (invertRgb)
         {
-            y = data.b.fastGet(i) << 8;
-            cb = data.b.fastGet(i + 1) - 128;
-            cr = data.b.fastGet(i + 2) - 128;
-            r = clampInt0to255((y + 359 * cr + 128) >> 8);
-            g = clampInt0to255((y -  88 * cb - 183 * cr + 128) >> 8);
-            b = clampInt0to255((y + 454 * cb + 128) >> 8);
-            data.set(i    , invertRgb ? b : r);
-            data.set(i + 1, g);
-            data.set(i + 2, invertRgb ? r : b);
-            data.set(i + 3, 0xFF);
-            i += 4;
+            while (i < length)
+            {
+                y = data.b.fastGet(i) << 8;
+                cb = data.b.fastGet(i + 1) - 128;
+                cr = data.b.fastGet(i + 2) - 128;
+                r = clampInt0to255((y + 359 * cr + 128) >> 8);
+                g = clampInt0to255((y -  88 * cb - 183 * cr + 128) >> 8);
+                b = clampInt0to255((y + 454 * cb + 128) >> 8);
+                data.set(i    , b);
+                data.set(i + 1, g);
+                data.set(i + 2, r);
+                data.set(i + 3, 0xFF);
+                i += 4;
+            }
+        }
+        else
+        {
+            while (i < length)
+            {
+                y = data.b.fastGet(i) << 8;
+                cb = data.b.fastGet(i + 1) - 128;
+                cr = data.b.fastGet(i + 2) - 128;
+                r = clampInt0to255((y + 359 * cr + 128) >> 8);
+                g = clampInt0to255((y -  88 * cb - 183 * cr + 128) >> 8);
+                b = clampInt0to255((y + 454 * cb + 128) >> 8);
+                data.set(i    , r);
+                data.set(i + 1, g);
+                data.set(i + 2, b);
+                data.set(i + 3, 0xFF);
+                i += 4;
+            }
         }
         return data;
     }
@@ -263,50 +290,103 @@ class Reader
 
         var i = 0;
         var length = data.length;
-        while (i < length)
+
+        if (invertRgb)
         {
-            Y = data.b.fastGet(i);
-            Cb = data.b.fastGet(i + 1);
-            Cr = data.b.fastGet(i + 2);
-            k = data.b.fastGet(i + 3);
+            while (i < length)
+            {
+                Y = data.b.fastGet(i);
+                Cb = data.b.fastGet(i + 1);
+                Cr = data.b.fastGet(i + 2);
+                k = data.b.fastGet(i + 3);
 
-            r = -122.67195406894 +
-            Cb * (-6.60635669420364e-5 * Cb + 0.000437130475926232 * Cr -
-            5.4080610064599e-5 * Y + 0.00048449797120281 * k -
-            0.154362151871126) +
-            Cr * (-0.000957964378445773 * Cr + 0.000817076911346625 * Y -
-            0.00477271405408747 * k + 1.53380253221734) +
-            Y * (0.000961250184130688 * Y - 0.00266257332283933 * k +
-            0.48357088451265) +
-            k * (-0.000336197177618394 * k + 0.484791561490776);
+                r = -122.67195406894 +
+                Cb * (-6.60635669420364e-5 * Cb + 0.000437130475926232 * Cr -
+                5.4080610064599e-5 * Y + 0.00048449797120281 * k -
+                0.154362151871126) +
+                Cr * (-0.000957964378445773 * Cr + 0.000817076911346625 * Y -
+                0.00477271405408747 * k + 1.53380253221734) +
+                Y * (0.000961250184130688 * Y - 0.00266257332283933 * k +
+                0.48357088451265) +
+                k * (-0.000336197177618394 * k + 0.484791561490776);
 
-            g = 107.268039397724 +
-            Cb * (2.19927104525741e-5 * Cb - 0.000640992018297945 * Cr +
-            0.000659397001245577 * Y + 0.000426105652938837 * k -
-            0.176491792462875) +
-            Cr * (-0.000778269941513683 * Cr + 0.00130872261408275 * Y +
-            0.000770482631801132 * k - 0.151051492775562) +
-            Y * (0.00126935368114843 * Y - 0.00265090189010898 * k +
-            0.25802910206845) +
-            k * (-0.000318913117588328 * k - 0.213742400323665);
+                g = 107.268039397724 +
+                Cb * (2.19927104525741e-5 * Cb - 0.000640992018297945 * Cr +
+                0.000659397001245577 * Y + 0.000426105652938837 * k -
+                0.176491792462875) +
+                Cr * (-0.000778269941513683 * Cr + 0.00130872261408275 * Y +
+                0.000770482631801132 * k - 0.151051492775562) +
+                Y * (0.00126935368114843 * Y - 0.00265090189010898 * k +
+                0.25802910206845) +
+                k * (-0.000318913117588328 * k - 0.213742400323665);
 
-            b = -20.810012546947 +
-            Cb * (-0.000570115196973677 * Cb - 2.63409051004589e-5 * Cr +
-            0.0020741088115012 * Y - 0.00288260236853442 * k +
-            0.814272968359295) +
-            Cr * (-1.53496057440975e-5 * Cr - 0.000132689043961446 * Y +
-            0.000560833691242812 * k - 0.195152027534049) +
-            Y * (0.00174418132927582 * Y - 0.00255243321439347 * k +
-            0.116935020465145) +
-            k * (-0.000343531996510555 * k + 0.24165260232407);
+                b = -20.810012546947 +
+                Cb * (-0.000570115196973677 * Cb - 2.63409051004589e-5 * Cr +
+                0.0020741088115012 * Y - 0.00288260236853442 * k +
+                0.814272968359295) +
+                Cr * (-1.53496057440975e-5 * Cr - 0.000132689043961446 * Y +
+                0.000560833691242812 * k - 0.195152027534049) +
+                Y * (0.00174418132927582 * Y - 0.00255243321439347 * k +
+                0.116935020465145) +
+                k * (-0.000343531996510555 * k + 0.24165260232407);
 
-            data.set(offset++, invertRgb ? clamp0to255(b) : clamp0to255(r));
-            data.set(offset++, clamp0to255(g));
-            data.set(offset++, invertRgb ? clamp0to255(r) : clamp0to255(b));
-            data.set(offset++, 0xFF);
+                data.set(offset++, clamp0to255(b));
+                data.set(offset++, clamp0to255(g));
+                data.set(offset++, clamp0to255(r));
+                data.set(offset++, 0xFF);
 
-            i += 4;
+                i += 4;
+            }
         }
+        else
+        {
+            while (i < length)
+            {
+                Y = data.b.fastGet(i);
+                Cb = data.b.fastGet(i + 1);
+                Cr = data.b.fastGet(i + 2);
+                k = data.b.fastGet(i + 3);
+
+                r = -122.67195406894 +
+                Cb * (-6.60635669420364e-5 * Cb + 0.000437130475926232 * Cr -
+                5.4080610064599e-5 * Y + 0.00048449797120281 * k -
+                0.154362151871126) +
+                Cr * (-0.000957964378445773 * Cr + 0.000817076911346625 * Y -
+                0.00477271405408747 * k + 1.53380253221734) +
+                Y * (0.000961250184130688 * Y - 0.00266257332283933 * k +
+                0.48357088451265) +
+                k * (-0.000336197177618394 * k + 0.484791561490776);
+
+                g = 107.268039397724 +
+                Cb * (2.19927104525741e-5 * Cb - 0.000640992018297945 * Cr +
+                0.000659397001245577 * Y + 0.000426105652938837 * k -
+                0.176491792462875) +
+                Cr * (-0.000778269941513683 * Cr + 0.00130872261408275 * Y +
+                0.000770482631801132 * k - 0.151051492775562) +
+                Y * (0.00126935368114843 * Y - 0.00265090189010898 * k +
+                0.25802910206845) +
+                k * (-0.000318913117588328 * k - 0.213742400323665);
+
+                b = -20.810012546947 +
+                Cb * (-0.000570115196973677 * Cb - 2.63409051004589e-5 * Cr +
+                0.0020741088115012 * Y - 0.00288260236853442 * k +
+                0.814272968359295) +
+                Cr * (-1.53496057440975e-5 * Cr - 0.000132689043961446 * Y +
+                0.000560833691242812 * k - 0.195152027534049) +
+                Y * (0.00174418132927582 * Y - 0.00255243321439347 * k +
+                0.116935020465145) +
+                k * (-0.000343531996510555 * k + 0.24165260232407);
+
+                data.set(offset++, clamp0to255(r));
+                data.set(offset++, clamp0to255(g));
+                data.set(offset++, clamp0to255(b));
+                data.set(offset++, 0xFF);
+
+                i += 4;
+            }
+        }
+
+
         return data;
     }
 
@@ -357,52 +437,105 @@ class Reader
         var i = 0;
         var length = data.length;
 
-        while (i < length)
+        if (invertRgb)
         {
-            c = data.b.fastGet(i);
-            m = data.b.fastGet(i + 1);
-            y = data.b.fastGet(i + 2);
-            k = data.b.fastGet(i + 3);
+            while (i < length)
+            {
+                c = data.b.fastGet(i);
+                m = data.b.fastGet(i + 1);
+                y = data.b.fastGet(i + 2);
+                k = data.b.fastGet(i + 3);
 
-            r =
-            c * (-4.387332384609988 * c + 54.48615194189176 * m +
-            18.82290502165302 * y + 212.25662451639585 * k -
-            72734.4411664936) +
-            m * (1.7149763477362134 * m - 5.6096736904047315 * y -
-            17.873870861415444 * k - 1401.7366389350734) +
-            y * (-2.5217340131683033 * y - 21.248923337353073 * k +
-            4465.541406466231) -
-            k * (21.86122147463605 * k + 48317.86113160301);
-            g =
-            c * (8.841041422036149 * c + 60.118027045597366 * m +
-            6.871425592049007 * y + 31.159100130055922 * k -
-            20220.756542821975) +
-            m * (-15.310361306967817 * m + 17.575251261109482 * y +
-            131.35250912493976 * k - 48691.05921601825) +
-            y * (4.444339102852739 * y + 9.8632861493405 * k -
-            6341.191035517494) -
-            k * (20.737325471181034 * k + 47890.15695978492);
-            b =
-            c * (0.8842522430003296 * c + 8.078677503112928 * m +
-            30.89978309703729 * y - 0.23883238689178934 * k -
-            3616.812083916688) +
-            m * (10.49593273432072 * m + 63.02378494754052 * y +
-            50.606957656360734 * k - 28620.90484698408) +
-            y * (0.03296041114873217 * y + 115.60384449646641 * k -
-            49363.43385999684) -
-            k * (22.33816807309886 * k + 45932.16563550634);
+                r =
+                c * (-4.387332384609988 * c + 54.48615194189176 * m +
+                18.82290502165302 * y + 212.25662451639585 * k -
+                72734.4411664936) +
+                m * (1.7149763477362134 * m - 5.6096736904047315 * y -
+                17.873870861415444 * k - 1401.7366389350734) +
+                y * (-2.5217340131683033 * y - 21.248923337353073 * k +
+                4465.541406466231) -
+                k * (21.86122147463605 * k + 48317.86113160301);
+                g =
+                c * (8.841041422036149 * c + 60.118027045597366 * m +
+                6.871425592049007 * y + 31.159100130055922 * k -
+                20220.756542821975) +
+                m * (-15.310361306967817 * m + 17.575251261109482 * y +
+                131.35250912493976 * k - 48691.05921601825) +
+                y * (4.444339102852739 * y + 9.8632861493405 * k -
+                6341.191035517494) -
+                k * (20.737325471181034 * k + 47890.15695978492);
+                b =
+                c * (0.8842522430003296 * c + 8.078677503112928 * m +
+                30.89978309703729 * y - 0.23883238689178934 * k -
+                3616.812083916688) +
+                m * (10.49593273432072 * m + 63.02378494754052 * y +
+                50.606957656360734 * k - 28620.90484698408) +
+                y * (0.03296041114873217 * y + 115.60384449646641 * k -
+                49363.43385999684) -
+                k * (22.33816807309886 * k + 45932.16563550634);
 
-            resultR = r >= 0.0 ? 255 : r <= min ? 0 : Math.floor(255.0 + r * scale);
-            resultG = g >= 0.0 ? 255 : g <= min ? 0 : Math.floor(255.0 + g * scale);
-            resultB = b >= 0.0 ? 255 : b <= min ? 0 : Math.floor(255.0 + b * scale);
+                resultR = r >= 0.0 ? 255 : r <= min ? 0 : Math.floor(255.0 + r * scale);
+                resultG = g >= 0.0 ? 255 : g <= min ? 0 : Math.floor(255.0 + g * scale);
+                resultB = b >= 0.0 ? 255 : b <= min ? 0 : Math.floor(255.0 + b * scale);
 
-            data.set(offset++, invertRgb ? resultB : resultR);
-            data.set(offset++, resultG);
-            data.set(offset++, invertRgb ? resultR : resultB);
-            data.set(offset++, 0xFF);
+                data.set(offset++, resultB);
+                data.set(offset++, resultG);
+                data.set(offset++, resultR);
+                data.set(offset++, 0xFF);
 
-            i += 4;
+                i += 4;
+            }
         }
+        else
+        {
+            while (i < length)
+            {
+                c = data.b.fastGet(i);
+                m = data.b.fastGet(i + 1);
+                y = data.b.fastGet(i + 2);
+                k = data.b.fastGet(i + 3);
+
+                r =
+                c * (-4.387332384609988 * c + 54.48615194189176 * m +
+                18.82290502165302 * y + 212.25662451639585 * k -
+                72734.4411664936) +
+                m * (1.7149763477362134 * m - 5.6096736904047315 * y -
+                17.873870861415444 * k - 1401.7366389350734) +
+                y * (-2.5217340131683033 * y - 21.248923337353073 * k +
+                4465.541406466231) -
+                k * (21.86122147463605 * k + 48317.86113160301);
+                g =
+                c * (8.841041422036149 * c + 60.118027045597366 * m +
+                6.871425592049007 * y + 31.159100130055922 * k -
+                20220.756542821975) +
+                m * (-15.310361306967817 * m + 17.575251261109482 * y +
+                131.35250912493976 * k - 48691.05921601825) +
+                y * (4.444339102852739 * y + 9.8632861493405 * k -
+                6341.191035517494) -
+                k * (20.737325471181034 * k + 47890.15695978492);
+                b =
+                c * (0.8842522430003296 * c + 8.078677503112928 * m +
+                30.89978309703729 * y - 0.23883238689178934 * k -
+                3616.812083916688) +
+                m * (10.49593273432072 * m + 63.02378494754052 * y +
+                50.606957656360734 * k - 28620.90484698408) +
+                y * (0.03296041114873217 * y + 115.60384449646641 * k -
+                49363.43385999684) -
+                k * (22.33816807309886 * k + 45932.16563550634);
+
+                resultR = r >= 0.0 ? 255 : r <= min ? 0 : Math.floor(255.0 + r * scale);
+                resultG = g >= 0.0 ? 255 : g <= min ? 0 : Math.floor(255.0 + g * scale);
+                resultB = b >= 0.0 ? 255 : b <= min ? 0 : Math.floor(255.0 + b * scale);
+
+                data.set(offset++, resultR);
+                data.set(offset++, resultG);
+                data.set(offset++, resultB);
+                data.set(offset++, 0xFF);
+
+                i += 4;
+            }
+        }
+
         return data;
     }
 
@@ -440,7 +573,12 @@ class Reader
 
             var subLength: Int = length - 2;
 
-            var subArray: haxe.io.Bytes = haxe.io.Bytes.alloc(subLength);
+            #if html5
+                var subArray: haxe.io.Bytes = new haxe.io.Bytes(subLength, new BytesData()); // This is 2x faster on Chrome, but a little slower on FireFox and Safari
+            #else
+                var subArray: haxe.io.Bytes = haxe.io.Bytes.alloc(subLength);
+            #end
+
             var subArrayIndex: Int = 0;
 
             for (i in offset...offset + subLength)
@@ -700,42 +838,51 @@ class Reader
         this.numComponents = this.components.length;
     }
 
-    function buildHuffmanTable(codeLengths: Vector<UInt>, values: Vector<UInt>) {
+    function buildHuffmanTable(codeLengths: Vector<UInt>, values: Vector<UInt>)
+    {
         var k = 0, i, j, length = 16;
         var code: Array<HuffNode> = new Array<HuffNode>();
-        while (length > 0 && codeLengths[length - 1] == 0) {
+
+        while (length > 0 && codeLengths[length - 1] == 0)
+        {
             length--;
         }
+
         code.push({children: [], index: 0});
 
         var p: HuffNode = code[0];
         var q: HuffNode;
 
-        for (i in 0...length) {
-        for (j in 0...codeLengths[i]) {
-        p = code.pop();
-        p.children[p.index] = values[k];
-
-        while (p.index > 0) {
-        p = code.pop();
-        }
-        p.index++;
-        code.push(p);
-        while (code.length <= i)
-
+        for (i in 0...length)
         {
-        code.push(q = {children: [], index: 0});
-        p.children[p.index] = q.children;
-        p = q;
-        }
-        k++;
-        }
-        if (i + 1 < length) {
-        // p here points to last
-        code.push(q = {children: [], index: 0});
-        p.children[p.index] = q.children;
-        p = q;
-        }
+            for (j in 0...codeLengths[i])
+            {
+                p = code.pop();
+                p.children[p.index] = {value: values[k], isLeaf: true, children: null} ;
+
+                while (p.index > 0)
+                {
+                    p = code.pop();
+                }
+
+                p.index++;
+                code.push(p);
+
+                while (code.length <= i)
+                {
+                    code.push(q = {children: [], index: 0});
+                    p.children[p.index] = {value: 0, isLeaf: false, children: q.children};
+                    p = q;
+                }
+                k++;
+            }
+            if (i + 1 < length)
+            {
+// p here points to last
+                code.push(q = {children: [], index: 0});
+                p.children[p.index] = {value: 0, isLeaf: false, children: q.children};
+                p = q;
+            }
         }
         return code[0].children;
     }
@@ -775,7 +922,7 @@ class Reader
             return bitsData >>> 7;
         }
 
-        function decodeHuffman(tree: Array<Dynamic>): Int
+        function decodeHuffman(tree: Array<HuffValue>): UInt
         {
             var node = tree;
             var iteration: Int = 0;
@@ -783,16 +930,14 @@ class Reader
             {
                 var index: Int = readBit();
 
-                if (Std.is(node[index], UInt))
+                var huff: HuffValue = node[index];
+
+                if (huff.isLeaf)
                 {
-                    return node[index];
+                    return huff.value;
                 }
 
-                if (!Std.is(node[index], Array)) {
-                    throw 'invalid huffman sequence';
-                }
-
-                node = node[index];
+                node = huff.children;
             }
         }
 
